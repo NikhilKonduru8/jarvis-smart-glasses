@@ -1,6 +1,8 @@
 # Jarvis — Real-Time, Vision-Grounded Engineering Co-Pilot for Smart Glasses 
 
-## 🎉 (Youngest Ever) Won 2nd at the YC x Moss Conversational AI Hackathon 2026 as Sophomores in High School, competing against Ivy League Graduates, Industry Professionals, and Technical Founders
+## 🎉 Won 2nd at the YC x Moss Conversational AI Hackathon 2026 — built as high school sophomores
+
+**Team:** Nikhil Konduru & Arnav Garg
 
 Demo Video: https://www.youtube.com/watch?v=1D_shq4_MYo 
 
@@ -48,15 +50,16 @@ stand up and walk around the lab with the full pipeline running.
 
 The on-device layer — wake-word detection, voice-activity detection, audio
 resampling, the orchestration state machine, and the display — runs **locally on
-the Pi** for instant response; the heavy intelligence (speech, vision, retrieval,
-reasoning) is reached over the Pi's own network connection, keeping the device
-light and battery-friendly.
+the Pi** for instant response, and Moss spec retrieval queries an index loaded
+into memory on the Pi. The heavy intelligence (speech, vision, reasoning) is
+reached over the Pi's own network connection, keeping the device light and
+battery-friendly.
 
 ---
 
-## 🧩 One big loop — every sponsor is connected
+## 🧩 One big loop — every piece is connected
 
-This is **not** five tools sitting side by side. They are wired into a single
+This is **not** a set of tools sitting side by side. They are wired into a single
 closed loop, and each one feeds the next. The interesting engineering is in the
 **integrations between them**:
 
@@ -84,9 +87,9 @@ closed loop, and each one feeds the next. The interesting engineering is in the
                                        └──────────────────┬──────────────────┘         │
                                                           ▼                            │
                                        ┌─────────────────────────────────────┐         │
-   📄 datasheet PDFs ──► UNSILOED AI ─►│            MOSS                     │         │
-       (offline, structured            │  real-time semantic search          │         │
-        chunk extraction)              │  (<10 ms, Rust/WASM vector index)   │         │
+   📄 component JSON ─► create_index ─►│            MOSS                     │         │
+       (structured datasheet           │  real-time semantic search          │         │
+        specs → spec chunks)           │  (in-memory Rust/WASM vector index) │         │
                                        └──────────────────┬──────────────────┘         │
                                                           │ matching spec chunks       │
                                                           ▼                            │
@@ -114,16 +117,18 @@ closed loop, and each one feeds the next. The interesting engineering is in the
 
 **How the integrations chain:**
 
-- **Unsiloed → Moss.** Unsiloed AI parses raw datasheet PDFs into clean,
-  structured chunks; those chunks *are* the corpus Moss indexes. Unsiloed makes
-  the knowledge real; Moss makes it instantly searchable.
+- **Structured specs → Moss.** Datasheet specs live as structured component
+  JSON (`agent-py/data/`); `map_components.py` + `create_index.py` turn them into
+  spec chunks and build the Moss index, which the Pi loads into memory at
+  startup. (Unsiloed AI, a sponsor, is the planned PDF → structured-chunk
+  ingestion step; the current build indexes the structured component JSON.)
 - **Qwen + LiveKit STT → Context Compiler.** The vision model says *what the part
   is*; the speech model says *what you want to know*. The compiler fuses them into
   one query (vision sees `LM358`, you ask "max voltage" → it queries Moss for
   `LM358 absolute maximum ratings`).
 - **Moss + Qwen → MiniMax.** The retrieved spec chunks and the visual scene become
-  a single grounding block, so MiniMax answers **only** from what is *seen* and
-  *verified* — not hallucinated.
+  a single grounding block, so MiniMax's answers are grounded in what the
+  camera *sees* and the *retrieved spec data*.
 - **LiveKit** wraps the whole loop as natural, interruptible voice (ears + mouth).
 
 No single sponsor produces the experience alone — **the product is the loop.**
@@ -174,22 +179,24 @@ No single sponsor produces the experience alone — **the product is the loop.**
    - **TTS:** Cartesia **sonic-3**, streamed and sped up (~1.3×) via the
      provider's native speed control (no pitch change).
 2. **Moss** — the **real-time retrieval layer, and a centerpiece of this build.**
-   Moss is a runtime for semantic search with a **Rust/WASM vector index** that
-   delivers **sub-10 ms lookups with no external vector database to stand up**. We
-   index one vector per datasheet chunk; at query time it returns the exact spec
-   passages for the component in view. It's what lets Jarvis ground every answer
-   in verified data *without* adding latency — even as the component library grows
-   large, retrieval stays ~10 ms.
+   Moss is a runtime for semantic search with a **Rust/WASM vector index**, built
+   for **sub-10 ms lookups (Moss's published figure) with no external vector
+   database to stand up**. We index one vector per spec chunk from the component
+   JSON; the index is built via Moss Cloud and loaded into memory on the Pi at
+   startup, and at query time it returns the spec passages for the component in
+   view. It's what lets Jarvis ground answers in retrieved spec data without a
+   vector-DB network round trip.
 3. **Qwen3-VL-Flash** (Alibaba DashScope, workspace MaaS endpoint, OpenAI-compatible)
    — multimodal scene understanding; **thinking disabled** for low latency; frames
    sent as downsampled base64 JPEGs.
 4. **MiniMax-M3** (OpenAI-compatible) — grounded reasoning engine; **thinking
    disabled** (direct, fast, clean output) with a `<think>`-stripping safety
    filter; streamed sentence-by-sentence into TTS; carries rolling conversation
-   memory.
-5. **Unsiloed AI** — datasheet PDF → structured chunk extraction (offline). Builds
-   the verified corpus that Moss indexes — the reason answers cite real specs
-   instead of guesses.
+   memory. The model is configurable via `MINIMAX_MODEL` (M3 is the default; the
+   demo config may use `MiniMax-M2.7-highspeed`).
+5. **Unsiloed AI** (sponsor) — planned datasheet PDF → structured-chunk
+   ingestion (offline). The current build indexes structured component JSON
+   (datasheet specs) directly.
 
 ### Software architecture
 - **ROS-style node graph.** Each stage is an independent **node** communicating
@@ -215,10 +222,10 @@ State machine: `Sleeping → Listening → Looking → Searching → Thinking �
 
 ### Latency engineering
 Several deliberate optimizations keep it conversational (~3 s):
-- **Moss sub-10 ms retrieval** — semantic search returns in **~10 ms even when
-  pulling from a large component database**, so grounding adds virtually nothing
-  to the latency budget. This is a big reason the whole loop stays fast; a
-  traditional vector-DB round trip would cost far more.
+- **In-memory Moss retrieval** — queries run against the index already loaded
+  on the Pi (Moss publishes sub-10 ms lookups), so grounding adds little to the
+  latency budget. This is a big reason the whole loop stays fast; a traditional
+  vector-DB network round trip would cost far more.
 - **Parallel vision** — Qwen fires the instant you start talking, hidden behind
   your speech + transcription instead of adding 2–3 s serially.
 - **Live streaming STT** — audio is pushed to STT frame-by-frame as you speak, so
@@ -236,8 +243,9 @@ Several deliberate optimizations keep it conversational (~3 s):
 | Wake word (openWakeWord/ONNX) | LiveKit STT (Deepgram nova-3) |
 | Voice-activity detection (WebRTC VAD) | LiveKit TTS (Cartesia sonic-3) |
 | Audio capture/playback + resampling | Qwen3-VL-Flash (vision) |
-| Orchestration state machine | Moss (semantic search) |
-| On-glasses OLED display, camera capture | MiniMax-M3 (reasoning) |
+| Orchestration state machine | MiniMax-M3 (reasoning) |
+| On-glasses OLED display, camera capture | Moss Cloud (index build, `create_index.py`) |
+| Moss query on loaded index (index built via Moss Cloud) | |
 
 ---
 
@@ -245,7 +253,8 @@ Several deliberate optimizations keep it conversational (~3 s):
 
 - **On-device wake word** — "Hey Jarvis," private and instant, no key.
 - **Vision-grounded answers** — answers about the component the camera sees.
-- **Verified grounding** — every spec traces to a real datasheet (Unsiloed → Moss).
+- **Spec grounding** — answers are grounded in retrieved spec data from the
+  structured component database (Moss).
 - **Proactive clarification** — if a request is ambiguous or missing a key detail,
   Jarvis asks a short follow-up question to build understanding instead of
   guessing. It's an active conversational partner, not a passive listener.
@@ -326,5 +335,5 @@ agent-py/
 └── pyproject.toml           # uv-managed deps
 ```
 
-*Won 2nd at the YC Conversational AI Hackathon 2026, integrating LiveKit, Moss,
-Qwen, MiniMax, and Unsiloed AI.*
+*Won 2nd at the YC x Moss Conversational AI Hackathon 2026, integrating LiveKit,
+Moss, Qwen, and MiniMax (Unsiloed AI planned for PDF → structured-spec ingestion).*
