@@ -1,6 +1,6 @@
 # Jarvis — Real-Time, Vision-Grounded Engineering Co-Pilot for Smart Glasses 
 
-## 🎉 Won 2nd at the YC x Moss Conversational AI Hackathon 2026 — built as high school sophomores
+## 🎉 Won 2nd at the YC x Moss Conversational AI Hackathon 2026 — built as high school sophomores (Youngest Ever)
 
 **Team:** Nikhil Konduru & Arnav Garg
 
